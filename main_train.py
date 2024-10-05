@@ -22,10 +22,16 @@ def parse_agrs():
                         help='the path to the directory containing the data.')
 
     # IDAM
-    parser.add_argument("--useIDAM", action="store_false", help="do you use IDAM?")
+    parser.add_argument("--isSingle", action="store_true")
+    parser.add_argument("--AM", type=str, default='VFAM', choices=['VFAM', 'SA', "CC"], help="do you use Image alignment?")
+    # parser.add_argument("--useIDAM", action="store_false", help="do you use IDAM?")
 
     # Mamba
-    parser.add_argument("--useVTFCM", action="store_false", help="do you use MAM?")
+    parser.add_argument("--useVTFCM", action="store_true", help="")
+
+    # d MIMIC-CXR VFAM的层数
+    parser.add_argument("--d", type=int, default=11, help="")
+
 
     # Data loader settings
     parser.add_argument('--dataset_name', type=str, default='iu_xray', choices=['iu_xray', 'mimic_cxr'],
@@ -71,7 +77,7 @@ def parse_agrs():
     # Trainer settings
     parser.add_argument('--n_gpu', type=int, default=1, help='the number of gpus to be used.')
     parser.add_argument('--epochs', type=int, default=100, help='the number of training epochs.')
-    parser.add_argument('--save_dir', type=str, default='results/iu_xray/', help='the patch to save the models.')
+    parser.add_argument('--save_dir', type=str, default='results/iu_xray_1to1_VFAM/', help='the patch to save the models.')
     parser.add_argument('--record_dir', type=str, default='records/', help='the patch to save the results of experiments.')
     parser.add_argument('--log_period', type=int, default=50, help='the logging interval (in batches).')
     parser.add_argument('--save_period', type=int, default=10, help='the saving period (in epochs).')

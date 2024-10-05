@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from modules.base_cmn import BaseCMN, clones
+from modules.base_cmn import BaseCMN, clones, MultiHeadedAttention
 # from modules.base_mam import BaseMAM
 from modules.visual_extractor import VisualExtractor
 from modules.ImgFeatureAlignModule import ImageFratureAlign
@@ -20,9 +20,14 @@ class BaseCMNModel(nn.Module):
         # else: self.visual_extractor = VisualExtractor(args)
         self.visual_extractor = VisualExtractor(args)
         self.encoder_decoder = BaseCMN(args, tokenizer)
+        self.AM = args.AM
+
+        self.d = args.d
         # self.visualMatrix = torch.randn(56, 56)
-        if args.useIDAM:
+        if args.AM == "VFAM":
             self.ImageFA = ImageFratureAlign(in_linear_feature=[2048, 1024], out_linear_feature=[1024, args.d_model], d_model=self.args.d_vf)
+        elif args.AM == "SA":
+            self.ImageFA = MultiHeadedAttention(h=8, d_model=2048)
         else:
             self.ImageFA = None
         if args.dataset_name == 'iu_xray':
@@ -36,13 +41,20 @@ class BaseCMNModel(nn.Module):
         return super().__str__() + '\nTrainable parameters: {}'.format(params)
 
     def forward_iu_xray(self, images, targets=None, mode='train', update_opts={}):
-        if self.args.visual_extractor == 'mamba':
-            att_feats_0, att_feats_1,fc_feats_0, fc_feats_1 = self.visual_extractor(images[:, 0], images[:, 1])
+        # if self.args.visual_extractor == 'mamba':
+        #     att_feats_0, att_feats_1,fc_feats_0, fc_feats_1 = self.visual_extractor(images[:, 0], images[:, 1])
+        # else:
+        if self.args.isSingle:
+            att_feats_0, fc_feats_0 = self.visual_extractor(images[:, 0]) # att_feats_0: (16, 49, 2048)
+            att_feats_1, fc_feats_1 = att_feats_0, fc_feats_0
         else:
             att_feats_0, fc_feats_0 = self.visual_extractor(images[:, 0]) # att_feats_0: (16, 49, 2048)
             att_feats_1, fc_feats_1 = self.visual_extractor(images[:, 1]) # att_feats_0: (16, 49, 2048)
-        if self.ImageFA:
+        if self.AM == "VFAM":
             att_feats = self.ImageFA(att_feats_0, att_feats_1)
+        elif self.AM == "SA":
+            att_feats = torch.cat((att_feats_0, att_feats_1), dim=1)
+            att_feats = self.ImageFA(att_feats, att_feats, att_feats)
         else:
             att_feats = torch.cat((att_feats_0, att_feats_1), dim=1)
         fc_feats = torch.cat((fc_feats_0, fc_feats_1), dim=1)
@@ -56,12 +68,30 @@ class BaseCMNModel(nn.Module):
             raise ValueError
 
     def forward_mimic_cxr(self, images, targets=None, mode='train', update_opts={}):
-        att_feats, fc_feats = self.visual_extractor(images)
+        fc_feats_list, att_feats_list = [], []
+        for i in range(self.d):
+            att_feats, fc_feats = self.visual_extractor(images[:, i])
+            fc_feats_list.append(fc_feats)
+            att_feats_list.append(att_feats)
+        x1 = att_feats_list[0]
+        x2 = att_feats_list[1]
+        for i in range(2, self.d):
+            if self.AM == "VFAM":
+                att_feats = self.ImageFA(x1, x2)
+            elif self.AM == "SA":
+                att_feats = torch.cat((x1, x2), dim=1)
+                att_feats = self.ImageFA(att_feats, att_feats, att_feats)
+            else:
+                att_feats = torch.cat((x1, x2), dim=1)
+            x1 = att_feats_list[i]
+            x2 = att_feats
+        # fc_feats = torch.cat(x2, dim=1)
+        # att_feats = x2
         if mode == 'train':
-            output = self.encoder_decoder(fc_feats, att_feats, targets, mode='forward')
+            output = self.encoder_decoder(fc_feats, x2, targets, mode='forward')
             return output
         elif mode == 'sample':
-            output, output_probs = self.encoder_decoder(fc_feats, att_feats, mode='sample', update_opts=update_opts)
+            output, output_probs = self.encoder_decoder(fc_feats, x2, mode='sample', update_opts=update_opts)
             return output, output_probs
         else:
             raise ValueError
